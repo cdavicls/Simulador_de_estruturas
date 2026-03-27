@@ -1,12 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+'''
 class Force:
     def __init__(self, magnitude, application_point,  versor):
         self.magnitude = magnitude
-        self.direction = versor #versor é um vetor unitário que indica a direção da força
+        self.versor = versor #versor é um vetor unitário que indica a direção da força
         self.application_point = application_point  #posição onde a força é aplicada, geralmente um nó ou coordenada específica
-
+'''
+        
 class Moment:
     def __init__(self, magnitude, application_point, wise_direction):
         self.magnitude = magnitude
@@ -14,9 +16,10 @@ class Moment:
         self.wise_direction = wise_direction  # Direção do momento: 1 para anti-horário, -1 para horário
 
 class Node:
-    def __init__(self, pos):
+    def __init__(self, pos, liberdade):
         self.pos = pos
         self.neighbor = []  # Armazena outros objetos Node
+        self.liberdade = liberdade  # tupla indicando se o nó é livre ou restrito em cada direção (x, y)
 
     def add_neighbor(self, neighbor):
         if neighbor not in self.neighbor:
@@ -24,22 +27,124 @@ class Node:
     def __repr__(self):
         return str(self.pos)
 
+'''
 class Suport:
     def __init__(self, node, type):
         self.node = node
         self.type = type  # Ex: 'fixo', 'movel', 'engaste'
+'''
+
+class Elemento:
+
+    def __init__(self, no_1, no_2, area_transversal, modulo_elasticidade):
+        self.no_1 = no_1
+        self.no_2 = no_2
+        self.area_transversal = area_transversal
+        self.modulo_elasticidade = modulo_elasticidade
+        self.length = ((no_2.pos[0] - no_1.pos[0]) ** 2 + (no_2.pos[1] - no_1.pos[1]) ** 2) ** 0.5
+        self.versor = np.array([(no_2.pos[0] - no_1.pos[0]) / self.length, (no_2.pos[1] - no_1.pos[1]) / self.length])
+
+        #Construir Matriz de Rigidez do Elemento
+        k = (self.area_transversal * self.modulo_elasticidade) / self.length
+        cos = self.versor[0]  # cos(θ)
+        sen = self.versor[1]  # sen(θ)
+        matriz = np.array([[cos**2, cos*sen, -cos**2, -cos*sen],
+                             [cos*sen, sen**2, -cos*sen, -sen**2],
+                             [-cos**2, -cos*sen, cos**2, cos*sen],
+                             [-cos*sen, -sen**2, cos*sen, sen**2]])
+        nos = [self.no_1, self.no_2]
+        for i in range(4):
+            if nos[i//2].liberdade[i%2] == 0:  # Se o nó é restrito na direção correspondente
+                matriz[i, :] = 0  # Zera a linha correspondente
+                matriz[:, i] = 0  # Zera a coluna correspondente
+                matriz[i, i] = 1  # Coloca um 1 na diagonal para evitar singularidade
+
+        self.matriz_rigidez = k * matriz
+        
+    def AplicarForcas(self, forcas): # 'forcas' é um dicionário onde as chaves são os nós e os valores são as forças aplicadas nesses nós
+        
+        forcas_normais = []
+        forcas_normais[0] = [self.versor * np.dot(forcas[self.no_1], self.versor)]
+        forcas_normais[1] = [self.versor * np.dot(forcas[self.no_2], self.versor)]
+
+        vetor_forcas = np.concatenate((forcas_normais[0], forcas_normais[1]))
+        u = np.linalg.solve(self.matriz_rigidez, vetor_forcas)
+        self.no_1.pos = (self.no_1.pos[0] + u[0], self.no_1.pos[1] + u[1])
+        self.no_2.pos = (self.no_2.pos[0] + u[2], self.no_2.pos[1] + u[3])
+
 
 class Structure:
-    def __init__(self):
-        self.nos = {}  # Dicionário para gerenciar os nós
-        self.forces = {}  # Dicionário para armazenar forças aplicadas aos nós
-        self.suportes = {}  # Dicionário para armazenar suportes
-        self.momentums = {}  # Dicionário para armazenar momentos aplicados aos nós
+    def __init__(self, elementos = []):
+        self.elementos = elementos
+        self.nos = []
+        for elemento in elementos:
+            self.nos.append(elemento.no_1)
+            self.nos.append(elemento.no_2)
+        self.nos = np.unique(self.nos)  # Remove nós duplicados
+        self.coords_nos = []
+        self.coords_nos = [np.concatenate(self.coords_nos, no.pos) for no in self.nos]
 
-    def add_node(self, name , pos):
-        if name not in self.nos:
-            self.nos[name] = Node(pos)
+        self.MatrizRigidez = self.CalcularMatrizRigidezGlobal()
+    
+    def CalcularMatrizRigidezGlobal(self):
+        matrizes_globais = [] # Lista para armazenar as matrizes globais de cada elemento
 
+        '''Escrever matriz do elemento como uma matriz global. Para isso,
+        cada matriz de um elemento é dividida em blocos correspondentes à cada nó,
+        com a matriz global sendo construída a partir desses blocos. Para a identificação
+        dos blocos, é necessário identificar as coordenadas dos nós do elemento
+        e mapear essas coordenadas para as posições correspondentes na matriz global.'''
+        for elemento in self.elementos:
+            id_nós = [self.nos.index(elemento.no_1), self.nos.index(elemento.no_2)] # identifica os índices dos nós do elemento
+
+            coord_blocos = []
+            for i in range(2):
+                for j in range(2):
+                    coord_blocos.append(id_nós[i], id_nós[j]) # Identifica as coordenadas dos blocos na matriz global
+            
+            blocos_matriz_elemento = []
+            dividir_verticalmente = np.vsplit(elemento.matriz_rigidez, 2) # Divide a matriz de rigidez do elemento em blocos verticais
+            for bloco in dividir_verticalmente:
+                dividir_horizontalmente = np.hsplit(bloco, 2) # Divide cada bloco vertical em blocos horizontais
+                blocos_matriz_elemento.append(dividir_horizontalmente) # Armazena os blocos da matriz do elemento
+
+            # Cria um dicionário para mapear as coordenadas dos blocos na matriz global aos blocos da matriz do elemento
+            dicionario_blocos = {coordenada: bloco for coordenada, bloco in zip(coord_blocos, blocos_matriz_elemento)}
+
+            #Cria a matriz global como uma matriz de blocos, com os blocos da matriz do elemento posicionados de acordo com as coordenadas identificadas, e os blocos vazios preenchidos com zeros
+            linhas_blocos_matriz_global = []
+            for i in range(len(self.nos)):
+                linha_bloco_matriz_global = []
+                for j in range(len(self.nos)):
+                    if (i, j) in dicionario_blocos:
+                        bloco_matriz_global = dicionario_blocos[(i, j)]
+                    else:
+                        bloco_matriz_global = np.zeros((2, 2)) # Bloco vazio para coordenadas que não correspondem a blocos do elemento
+                    linha_bloco_matriz_global.append(bloco_matriz_global)
+                linhas_blocos_matriz_global.append(linha_bloco_matriz_global)
+            matriz_global = np.block(linhas_blocos_matriz_global) # Constrói a matriz global a partir dos blocos
+
+            matrizes_globais.append(matriz_global)
+
+        matriz_global_total = sum(matrizes_globais) # Soma as matrizes globais de todos os elementos para obter a matriz global total da estrutura
+        return matriz_global_total
+
+    def AplicarForcas(self, forcas): # 'forcas' é um dicionário onde as chaves são os nós e os valores são as forças aplicadas nesses nós
+        vetor_forcas = []
+        for no in self.nos:
+            if no in forcas:
+                vetor_forcas.append(forcas[no])
+            else:
+                vetor_forcas.append((0, 0))  # Se não houver força aplicada, considera como (0, 0)
+
+        vetor_forcas = np.concatenate(vetor_forcas)  # Concatena as forças em um único vetor
+        u = np.linalg.solve(self.MatrizRigidez, vetor_forcas)  # Resolve o sistema de equações para obter os deslocamentos
+
+        # Atualiza as posições dos nós com base nos deslocamentos calculados
+        for i, no in enumerate(self.nos):
+            no.pos = (no.pos[0] + u[2*i], no.pos[1] + u[2*i + 1])
+                        
+    '''
     def add_edge(self, no_1, no_2):
         # Garante que os nós existem
         if no_1 not in self.nos:
@@ -127,3 +232,4 @@ class Structure:
 #     def solve(self):
 #         # Implementar a lógica para resolver a estrutura usando métodos de análise estrutural
 #         pass   
+'''
