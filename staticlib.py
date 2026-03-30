@@ -43,35 +43,25 @@ class Elemento:
         self.modulo_elasticidade = modulo_elasticidade
         self.length = ((no_2.pos[0] - no_1.pos[0]) ** 2 + (no_2.pos[1] - no_1.pos[1]) ** 2) ** 0.5
         self.versor = np.array([(no_2.pos[0] - no_1.pos[0]) / self.length, (no_2.pos[1] - no_1.pos[1]) / self.length])
+        self.matriz_rigidez = self.CalcularMatrizRigidez()
 
-        #Construir Matriz de Rigidez do Elemento
+    def CalcularMatrizRigidez(self):
         k = (self.area_transversal * self.modulo_elasticidade) / self.length
         cos = self.versor[0]  # cos(θ)
         sen = self.versor[1]  # sen(θ)
-        matriz = np.array([[cos**2, cos*sen, -cos**2, -cos*sen],
-                             [cos*sen, sen**2, -cos*sen, -sen**2],
-                             [-cos**2, -cos*sen, cos**2, cos*sen],
-                             [-cos*sen, -sen**2, cos*sen, sen**2]])
+        matriz = np.array([ [cos**2, cos*sen, -cos**2, -cos*sen],
+                            [cos*sen, sen**2, -cos*sen, -sen**2],
+                            [-cos**2, -cos*sen, cos**2, cos*sen],
+                            [-cos*sen, -sen**2, cos*sen, sen**2]])
         nos = [self.no_1, self.no_2]
         for i in range(4):
             if nos[i//2].liberdade[i%2] == 0:  # Se o nó é restrito na direção correspondente
                 matriz[i, :] = 0  # Zera a linha correspondente
                 matriz[:, i] = 0  # Zera a coluna correspondente
                 matriz[i, i] = 1  # Coloca um 1 na diagonal para evitar singularidade
-
-        self.matriz_rigidez = k * matriz
         
-    def AplicarForcas(self, forcas): # 'forcas' é um dicionário onde as chaves são os nós e os valores são as forças aplicadas nesses nós
+        return k * matriz
         
-        forcas_normais = []
-        forcas_normais[0] = [self.versor * np.dot(forcas[self.no_1], self.versor)]
-        forcas_normais[1] = [self.versor * np.dot(forcas[self.no_2], self.versor)]
-
-        vetor_forcas = np.concatenate((forcas_normais[0], forcas_normais[1]))
-        u = np.linalg.solve(self.matriz_rigidez, vetor_forcas)
-        self.no_1.pos = (self.no_1.pos[0] + u[0], self.no_1.pos[1] + u[1])
-        self.no_2.pos = (self.no_2.pos[0] + u[2], self.no_2.pos[1] + u[3])
-
 
 class Structure:
     def __init__(self, elementos = []):
@@ -80,9 +70,10 @@ class Structure:
         for elemento in elementos:
             self.nos.append(elemento.no_1)
             self.nos.append(elemento.no_2)
-        self.nos = np.unique(self.nos)  # Remove nós duplicados
+        self.nos = list(set(self.nos))  # Remove nós duplicados
         self.coords_nos = []
-        self.coords_nos = [np.concatenate(self.coords_nos, no.pos) for no in self.nos]
+        self.coords_nos = [np.concatenate((self.coords_nos, no.pos)) for no in self.nos]
+        self.nos_deformados = self.nos
 
         self.MatrizRigidez = self.CalcularMatrizRigidezGlobal()
     
@@ -100,13 +91,13 @@ class Structure:
             coord_blocos = []
             for i in range(2):
                 for j in range(2):
-                    coord_blocos.append(id_nós[i], id_nós[j]) # Identifica as coordenadas dos blocos na matriz global
+                    coord_blocos.append((id_nós[i], id_nós[j])) # Identifica as coordenadas dos blocos na matriz global
             
             blocos_matriz_elemento = []
             dividir_verticalmente = np.vsplit(elemento.matriz_rigidez, 2) # Divide a matriz de rigidez do elemento em blocos verticais
             for bloco in dividir_verticalmente:
                 dividir_horizontalmente = np.hsplit(bloco, 2) # Divide cada bloco vertical em blocos horizontais
-                blocos_matriz_elemento.append(dividir_horizontalmente) # Armazena os blocos da matriz do elemento
+                blocos_matriz_elemento.extend(dividir_horizontalmente) # Armazena os blocos da matriz do elemento
 
             # Cria um dicionário para mapear as coordenadas dos blocos na matriz global aos blocos da matriz do elemento
             dicionario_blocos = {coordenada: bloco for coordenada, bloco in zip(coord_blocos, blocos_matriz_elemento)}
@@ -141,10 +132,9 @@ class Structure:
         u = np.linalg.solve(self.MatrizRigidez, vetor_forcas)  # Resolve o sistema de equações para obter os deslocamentos
 
         # Atualiza as posições dos nós com base nos deslocamentos calculados
-        for i, no in enumerate(self.nos):
+        for i, no in enumerate(self.nos_deformados):
             no.pos = (no.pos[0] + u[2*i], no.pos[1] + u[2*i + 1])
                         
-    '''
     def add_edge(self, no_1, no_2):
         # Garante que os nós existem
         if no_1 not in self.nos:
@@ -159,49 +149,6 @@ class Structure:
     def show_nodes(self):
         for valor, no in self.nos.items():
             print(f"Nó {valor} conectado a: {no.neighbor}")
-
-    def add_forces(self, name, valor, application_point, versor):
-        if name not in self.forces:
-            self.forces[name] = Force(valor, application_point, versor)
-
-    def add_suport(self, name, node_name, type):
-        if node_name not in self.nos:
-            raise ValueError(f"Nó '{node_name}' não existe.")
-        if node_name in self.suportes:
-            raise ValueError(f"Nó '{node_name}' já possui um suporte.")
-        if name not in self.suportes:
-            self.suportes[name] = Suport(self.nos[node_name], type)
-            if type == 'fixo':
-                self.forces["Fx_" + node_name] = Force(None, self.nos[node_name].pos, (1, 0))  # Exemplo de força para suporte fixo
-                self.forces["Fy_" + node_name] = Force(None, self.nos[node_name].pos, (0, 1))  # Exemplo de força para suporte fixo
-            elif type == 'movel':
-                self.forces["Fx_" + node_name] = Force(None, self.nos[node_name].pos, (0, 1))  # Exemplo de força para suporte móvel
-            elif type == 'engaste':
-                self.forces["Fx_" + node_name] = Force(None, self.nos[node_name].pos, (1, 0))  # Exemplo de força para suporte de engaste
-                self.forces["Fy_" + node_name] = Force(None, self.nos[node_name].pos, (0, 1))  # Exemplo de força para suporte de engaste
-                self.momentums["M_" + node_name] = Moment(None, self.nos[node_name].pos, 1)  # Exemplo de momento para suporte de engaste
-
-    def distance_between_nodes(self, no_1, no_2):
-        if no_1 not in self.nos:
-            raise ValueError(f"Nó '{no_1}' não existe.")
-        if no_2 not in self.nos:
-            raise ValueError(f"Nó '{no_2}' não existe.")
-        pos1 = self.nos[no_1].pos
-        pos2 = self.nos[no_2].pos
-        return ((pos1[0] - pos2[0]) ** 2 + (pos1[1] - pos2[1]) ** 2) ** 0.5
-    
-    def calc_versor_between_nodes(self, no_1, no_2):
-        if no_1 not in self.nos:
-            raise ValueError(f"Nó '{no_1}' não existe.")
-        if no_2 not in self.nos:
-            raise ValueError(f"Nó '{no_2}' não existe.")
-        pos1 = self.nos[no_1].pos
-        pos2 = self.nos[no_2].pos
-        distance = self.distance_between_nodes(no_1, no_2)
-        if distance == 0:
-            raise ValueError("Os nós estão na mesma posição, não é possível calcular o versor.")
-        versor = ((pos2[0] - pos1[0]) / distance, (pos2[1] - pos1[1]) / distance)
-        return versor
     
     def show_structure(self):
         plt.figure(figsize=(4, 4))
@@ -232,4 +179,3 @@ class Structure:
 #     def solve(self):
 #         # Implementar a lógica para resolver a estrutura usando métodos de análise estrutural
 #         pass   
-'''

@@ -2,23 +2,22 @@ import matplotlib
 matplotlib.use('TkAgg') # Força o uso do renderizador de janelas interativo
 import matplotlib.pyplot as plt
 import staticlib as sl
+import numpy as np
 
+nos = []
+nos.append(sl.Node(np.array([0, 0]), (0, 0)))
+nos.append(sl.Node(np.array([1, 1]), (0, 0)))
+nos.append(sl.Node(np.array([1, 0]), (1, 1)))
 
-strc = sl.Structure()
+barras = []
+barras.append(sl.Elemento(nos[0], nos[2], 1, 1))
+barras.append(sl.Elemento(nos[1], nos[2], 1, 1))
 
-strc.add_node('A', (0, 0))
-strc.add_node('B', (1, 2))
-strc.add_node('C', (2, 0))
+for barra in barras:
+    print(barra.matriz_rigidez)
+    print()
 
-strc.add_edge('A', 'B')
-strc.add_edge('B', 'C')
-strc.add_edge('C', 'A')
+strc = sl.Structure(barras)
 
-strc.add_forces('F1', 100, (1, 2), (0, -1))  # Exemplo de força aplicada no nó B
-
-strc.add_suport('S1', 'A', 'fixo')  # Exemplo de suporte fixo no nó A
-
-strc.show_structure()
-
-
-strc.show_nodes()
+print()
+print(strc.MatrizRigidez)
