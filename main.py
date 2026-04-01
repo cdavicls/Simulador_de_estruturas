@@ -21,3 +21,13 @@ strc = sl.Structure(barras)
 
 print()
 print(strc.MatrizRigidez)
+
+forcas = {nos[2]: np.array([-5, 6])}
+strc.AplicarForcas(forcas)
+
+strc.show_structure()
+strc.show_structure(1)
+
+
+plt.show()
+

@@ -20,6 +20,7 @@ class Node:
         self.pos = pos
         self.neighbor = []  # Armazena outros objetos Node
         self.liberdade = liberdade  # tupla indicando se o nó é livre ou restrito em cada direção (x, y)
+        self.deslocamento = (0.0, 0.0)
 
     def add_neighbor(self, neighbor):
         if neighbor not in self.neighbor:
@@ -71,9 +72,9 @@ class Structure:
             self.nos.append(elemento.no_1)
             self.nos.append(elemento.no_2)
         self.nos = list(set(self.nos))  # Remove nós duplicados
+        self.id_nos = dict(zip(self.nos, [self.nos.index(no) for no in self.nos])) #Associa cada nó à sua posição na lista de nós
         self.coords_nos = []
         self.coords_nos = [np.concatenate((self.coords_nos, no.pos)) for no in self.nos]
-        self.nos_deformados = self.nos
 
         self.MatrizRigidez = self.CalcularMatrizRigidezGlobal()
     
@@ -86,7 +87,7 @@ class Structure:
         dos blocos, é necessário identificar as coordenadas dos nós do elemento
         e mapear essas coordenadas para as posições correspondentes na matriz global.'''
         for elemento in self.elementos:
-            id_nós = [self.nos.index(elemento.no_1), self.nos.index(elemento.no_2)] # identifica os índices dos nós do elemento
+            id_nós = [self.id_nos[elemento.no_1], self.id_nos[elemento.no_2]] # identifica os índices dos nós do elemento
 
             coord_blocos = []
             for i in range(2):
@@ -131,9 +132,13 @@ class Structure:
         vetor_forcas = np.concatenate(vetor_forcas)  # Concatena as forças em um único vetor
         u = np.linalg.solve(self.MatrizRigidez, vetor_forcas)  # Resolve o sistema de equações para obter os deslocamentos
 
+        '''
         # Atualiza as posições dos nós com base nos deslocamentos calculados
         for i, no in enumerate(self.nos_deformados):
             no.pos = (no.pos[0] + u[2*i], no.pos[1] + u[2*i + 1])
+        '''
+        for i, no in enumerate(self.nos):
+            no.deslocamento = (no.deslocamento[0] + u[2*i], no.deslocamento[1] + u[2*i + 1])
                         
     def add_edge(self, no_1, no_2):
         # Garante que os nós existem
@@ -149,28 +154,31 @@ class Structure:
     def show_nodes(self):
         for valor, no in self.nos.items():
             print(f"Nó {valor} conectado a: {no.neighbor}")
-    
-    def show_structure(self):
+
+    def show_structure(self, deformada = 0):
         plt.figure(figsize=(4, 4))
-        for valor, no in self.nos.items():
-            for neighbor in no.neighbor:
-                plt.plot([no.pos[0], neighbor.pos[0]], [no.pos[1], neighbor.pos[1]], 'k-')
 
-            plt.plot(no.pos[0], no.pos[1], 'ro')  # Nó em vermelho
-            plt.text(no.pos[0], no.pos[1], valor, fontsize=12, ha='right', va='bottom')  # Rótulo do nó
+        d = bool(deformada)
 
-        for valor, force in self.forces.items():
-            plt.arrow(force.application_point[0] - force.direction[0]*1.1, force.application_point[1] - force.direction[1]*1.1, force.direction[0], force.direction[1], head_width=0.1, head_length=0.1, fc='blue', ec='blue')
-            plt.text(force.application_point[0] + force.direction[0]*0.1, force.application_point[1] + force.direction[1]*.1, valor, fontsize=10, ha='left', va='bottom', color='blue')
-        
-        # for valor, suport in self.suportes.items():
-        #     if suport.type == 'fixo':
-        #         ## Desenho de suporte fixo (triângulo) WIP
+        for elemento in self.elementos:
+            nos_barra = [elemento.no_1, elemento.no_2]
+            x_nos_barra = [no.pos[0] + d*no.deslocamento[0] for no in nos_barra]
+            y_nos_barra = [no.pos[1] + d*no.deslocamento[1] for no in nos_barra]
 
+            plt.plot(x_nos_barra, y_nos_barra, 'k-', linewidth=5)
+
+        for no in self.nos:
+            if no.liberdade == (0, 0):
+                simbolo = '^'
+            else:
+                simbolo = 'o'
+            x_no = no.pos[0] + d*no.deslocamento[0]
+            y_no = no.pos[1] + d*no.deslocamento[1]
+            plt.plot(x_no, y_no, 'r'+simbolo, markersize=20)
 
         plt.gca().set_aspect('equal', adjustable='box')
         plt.grid(True)
-        plt.show()
+        return
 
 #  class Simulador:
 #     def __init__(self, structure):
